@@ -204,9 +204,6 @@ graph TD
 ## 🧪 Testing
 
 ### Backend Testing
-```bash
-# Run with test data
-python -m pytest tests/
 
 # Manual API testing
 curl -X POST http://localhost:8000/api/create_link_token
@@ -246,13 +243,6 @@ npm test
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **Documentation**: Check the `/docs` folder for detailed guides
-- **Issues**: Report bugs via GitHub Issues
-- **Discussions**: Join community discussions
-- **Email**: Contact support@financeassistant.com
 
 ## 🙏 Acknowledgments
 
