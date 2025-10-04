@@ -14,7 +14,7 @@ load_dotenv()
 
 class AdvancedFinanceAgent:
     def __init__(self):
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
         self.supabase_url = os.getenv("SUPABASE_URL")
         self.supabase_key = os.getenv("SUPABASE_KEY")
         self.headers = {

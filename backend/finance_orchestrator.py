@@ -7,6 +7,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from agent_tools import search_web, send_negotiation_email, send_user_alert
 from forecast_agent import forecast_overall_spending
+from supadata import insert_subscription
 
 load_dotenv()
 
@@ -19,6 +20,7 @@ class FinanceState(TypedDict):
     forecast_results: Dict[str, Any]
     subscriptions: List[dict]
     alerts: List[str]
+    emails: List[dict]
     user_query: str
     chat_response: str
 
@@ -128,7 +130,7 @@ class SubscriptionAgent(Agent):
             goal="Identify recurring subscriptions and negotiate discounts using AI-powered alternative discovery.",
             tools=[SearchWebTool(), SendNegotiationEmailTool()]
         )
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.1)
     
     def plan(self, state: FinanceState) -> FinanceState:
         transactions = state.get("transactions", [])[:40]
@@ -153,13 +155,39 @@ class SubscriptionAgent(Agent):
         }}
         Rent payments do not count as subscriptions.
         """
-        response = self.llm.invoke([SystemMessage(content=prompt)])
+        response = self.llm.invoke([HumanMessage(content=prompt)])
         content = response.content.strip()
 
         try:
             content = content.replace("```json", "").replace("```", "")
             subscriptions = json.loads(content).get("subscriptions", [])
-        except json.JSONDecodeError:
+            
+            # Save each subscription to database (check for duplicates)
+            for sub in subscriptions:
+                # Check if subscription already exists
+                supabase_url = os.getenv("SUPABASE_URL")
+                supabase_key = os.getenv("SUPABASE_KEY")
+                headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
+                
+                existing = requests.get(
+                    f"{supabase_url}/rest/v1/subscriptions?merchant=eq.{sub.get('merchant')}",
+                    headers=headers
+                ).json()
+                
+                # Skip rent and other excluded items
+                merchant = sub.get("merchant", "").upper()
+                if any(word in merchant for word in ["RENT", "CREDIT CARD", "TRANSFER", "PAYMENT"]):
+                    continue
+                    
+                if not existing:  # Only insert if doesn't exist
+                    subscription_data = {
+                        "merchant": sub.get("merchant"),
+                        "amount": sub.get("amount"),
+                    }
+                    insert_subscription(subscription_data)
+
+        except Exception as e:
+            print(f"Error analyzing subscriptions: {e}")
             subscriptions = []
 
         for sub in subscriptions:
@@ -220,17 +248,25 @@ class SubscriptionAgent(Agent):
                 sub["email_sent"] = False
                 sub["email_status"] = f"No email found - {reasoning}"
             else:
-                # Send email if we found a valid address
-                email_result = email_tool(
-                    to_email=email_addr,
-                    subject="Subscription Discount Request",
-                    body=sub["negotiation_email"]
-                )
+                # Store email for approval instead of sending automatically
                 sub["contact_email"] = email_addr
-                sub["email_sent"] = email_result.get("success", False)
-                sub["email_status"] = f"Email sent with {confidence} confidence - {reasoning}"
+                sub["email_sent"] = False
+                sub["email_status"] = f"Email ready to send with {confidence} confidence - {reasoning}"
+                sub["email_subject"] = "Subscription Discount Request"
 
         state["subscriptions"] = subscriptions
+        # Store emails for approval
+        emails_for_approval = []
+        for sub in subscriptions:
+            if sub.get("contact_email") and sub.get("contact_email") != "Not found" and "@" in sub.get("contact_email", ""):
+                emails_for_approval.append({
+                    "merchant": sub["merchant"],
+                    "to": sub["contact_email"],
+                    "subject": sub.get("email_subject", "Subscription Discount Request"),
+                    "body": sub["negotiation_email"],
+                    "email_sent": False
+                })
+        state["emails"] = emails_for_approval
         return state
 
 # -------------------------------
@@ -270,7 +306,7 @@ class AgenticChatAgent(Agent):
             goal="Answer user questions using all available financial data, fetching or updating it as needed.",
             tools=[]
         )
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.3)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.3)
         self.data_agent = data_agent
         self.forecast_agent = forecast_agent
         self.subscription_agent = subscription_agent
@@ -283,11 +319,11 @@ class AgenticChatAgent(Agent):
         user_query = state.get("user_query", "")
         needed_info = []
         
-        if "transactions" in user_query.lower() or "spending" in user_query.lower():
+        if any(word in user_query.lower() for word in ["transactions", "spending", "expenses", "biggest", "categories", "money", "spent", "cost"]):
             needed_info.append("transactions")
-        if "forecast" in user_query.lower() or "future" in user_query.lower():
+        if any(word in user_query.lower() for word in ["forecast", "future", "predict", "next", "will spend"]):
             needed_info.append("forecast")
-        if "subscription" in user_query.lower() or "recurring" in user_query.lower():
+        if any(word in user_query.lower() for word in ["subscription", "recurring", "monthly", "netflix", "spotify"]):
             needed_info.append("subscriptions")
         if "transactions" in needed_info and not self.memory["transactions_fetched"]:
             state = self.data_agent.plan(state)
@@ -315,6 +351,7 @@ class AgenticChatAgent(Agent):
 # -------------------------------
 # ORCHESTRATOR
 # -------------------------------
+
 def create_finance_orchestrator():
     workflow = StateGraph(FinanceState)
     data_agent = DataAgent()
@@ -356,7 +393,7 @@ def run_finance_analysis(user_query="Analyze my finances"):
     orchestrator = create_finance_orchestrator()
     initial_state = {
         "transactions": [], "categorized_data": {}, "forecast_results": {},
-        "subscriptions": [], "alerts": [], "user_query": user_query, "chat_response": ""
+        "subscriptions": [], "alerts": [], "emails": [], "user_query": user_query, "chat_response": ""
     }
     return orchestrator.invoke(initial_state)
 
@@ -365,6 +402,6 @@ def run_chat_analysis(user_query="Hello"):
     orchestrator = create_chat_orchestrator()
     initial_state = {
         "transactions": [], "categorized_data": {}, "forecast_results": {},
-        "subscriptions": [], "alerts": [], "user_query": user_query, "chat_response": ""
+        "subscriptions": [], "alerts": [], "emails": [], "user_query": user_query, "chat_response": ""
     }
     return orchestrator.invoke(initial_state)

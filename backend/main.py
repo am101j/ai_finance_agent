@@ -20,7 +20,7 @@ import os
 from supadata import insert_account, insert_transactions, get_account_by_name_type, get_transaction_by_details, get_transaction_by_plaid_id #, get_all_transactions, get_all_accounts
 from forecast_agent import forecast_overall_spending
 from subscription_agent import run_subscription_analysis
-from finance_orchestrator import run_finance_analysis, run_chat_analysis
+from finance_orchestrator import run_finance_analysis
 from fastapi.responses import JSONResponse
 
 
@@ -208,13 +208,13 @@ async def analyze_finances(request: dict = None):
 
 @app.post("/api/chat")
 async def chat_endpoint(request: Request):
-    """Chat with the financial AI agent using optimized orchestrator."""
+    """Chat with the advanced intelligent AI agent."""
     try:
+        from intelligent_agent import query_finance_agent
         data = await request.json()
-        user_query = data.get("query", "Hello")  # default if none provided
-        state_result = run_chat_analysis(user_query=user_query)
-        chat_response = state_result.get("chat_response", "")
-        return JSONResponse({"response": chat_response})
+        user_query = data.get("query", "Hello")
+        response = query_finance_agent(user_query)
+        return JSONResponse({"response": response})
     except Exception as e:
         return JSONResponse({"error": str(e)})
 
@@ -228,6 +228,135 @@ async def analyze_expenses(query: str = "biggest expenses", days: int = 30):
     except Exception as e:
         return {"error": str(e)}
 
+@app.post("/api/send_email")
+async def send_email(request: dict):
+    """Send an approved email"""
+    try:
+        from agent_tools import send_negotiation_email
+        
+        to_email = request.get("to")
+        subject = request.get("subject")
+        body = request.get("body")
+        
+        if not all([to_email, subject, body]):
+            return {"error": "Missing required fields: to, subject, body"}
+        
+        result = send_negotiation_email(to_email, subject, body)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
+@app.get("/api/spending_categories")
+async def get_spending_categories(days: int = 30):
+    """Get spending breakdown by Plaid main categories for pie chart (strict, no description-based mapping)"""
+    try:
+        from datetime import datetime, timedelta
+        import requests
+        import os
 
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_KEY")
+        headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
 
+        # Fetch transactions from last N days
+        cutoff_date = (datetime.strptime("2025-08-15", "%Y-%m-%d") - timedelta(days=days)).strftime('%Y-%m-%d')
+        response = requests.get(
+            f"{supabase_url}/rest/v1/transactions?date=gte.{cutoff_date}",
+            headers=headers
+        )
+
+        if response.status_code != 200:
+            return {"error": "Failed to fetch transactions"}
+
+        transactions = response.json()
+
+        # Categories to exclude (fixed expenses, income, transfers, etc.)
+        excluded = [
+            "TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS", "INCOME", 
+            "RENT_AND_UTILITIES", "RENT", "UTILITIES", "INSURANCE", 
+            "MORTGAGE", "LOAN", "CREDIT_CARD_PAYMENT"
+        ]
+
+        category_totals = {}
+        total_spending = 0
+
+        for tx in transactions:
+            amount = float(tx['amount'])
+            if amount <= 0:  # Only expenses
+                continue
+
+            full_category = tx.get('category', 'OTHER')
+            main_category = full_category.split(" > ")[0].upper()
+
+            if main_category in excluded:
+                continue
+
+            category_totals.setdefault(main_category, 0)
+            category_totals[main_category] += amount
+            total_spending += amount
+
+        # Convert to chart format
+        chart_data = []
+        colors = ["#F59E0B", "#EC4899", "#8B5CF6", "#10B981", "#3B82F6", "#EF4444", "#14B8A6", "#A855F7"]
+        for i, (name, value) in enumerate(category_totals.items()):
+            chart_data.append({
+                "name": name,
+                "value": round(value, 2),
+                "percentage": round((value / total_spending * 100), 1) if total_spending > 0 else 0,
+                "fill": colors[i % len(colors)]
+            })
+
+        return {
+            "categories": chart_data,
+            "total_spending": round(total_spending, 2),
+            "period_days": days
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/cleanup_duplicates")
+async def cleanup_duplicates():
+    """Remove duplicate transactions based on Plaid transaction ID"""
+    try:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_KEY")
+        headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
+        
+        # Find duplicates by Plaid transaction ID
+        response = requests.get(
+            f"{supabase_url}/rest/v1/transactions?select=id,plaid_transaction_id&order=created_at.asc",
+            headers=headers
+        )
+        
+        if response.status_code != 200:
+            return {"error": "Failed to fetch transactions"}
+        
+        transactions = response.json()
+        seen_plaid_ids = set()
+        duplicates_to_delete = []
+        
+        for tx in transactions:
+            plaid_id = tx.get('plaid_transaction_id')
+            if plaid_id and plaid_id in seen_plaid_ids:
+                duplicates_to_delete.append(tx['id'])
+            elif plaid_id:
+                seen_plaid_ids.add(plaid_id)
+        
+        # Delete duplicates
+        deleted_count = 0
+        for tx_id in duplicates_to_delete:
+            delete_response = requests.delete(
+                f"{supabase_url}/rest/v1/transactions?id=eq.{tx_id}",
+                headers=headers
+            )
+            if delete_response.status_code == 204:
+                deleted_count += 1
+        
+        return {
+            "message": f"Cleanup complete: {deleted_count} duplicate transactions removed",
+            "duplicates_found": len(duplicates_to_delete),
+            "duplicates_deleted": deleted_count
+        }
+    except Exception as e:
+        return {"error": str(e)}

@@ -17,7 +17,7 @@ function Chatbot({ accessToken }) {
 
     try {
       // Send message to chat agent
-      const response = await fetch('http://localhost:8000/api/chat', {
+      const response = await fetch('http://localhost:8001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: input })
@@ -56,42 +56,39 @@ function Chatbot({ accessToken }) {
   ];
 
   return (
-    <div className="chatbot">
-      <h3>💬 Financial Assistant</h3>
+    <div className="chat-container">
+      <div className="chat-header">
+        <span className="gradient-text">🤖 AI Assistant</span>
+      </div>
       
       <div className="chat-messages">
         {messages.map((message, index) => (
-          <div key={index} className={`message ${message.type}`}>
-            {message.text}
+          <div key={index} className={`chat-message ${message.type}`}>
+            <div className="message-content">{message.text}</div>
           </div>
         ))}
         {loading && (
-          <div className="message bot">
-            <div className="loading-spinner"></div> Thinking...
+          <div className="chat-message bot">
+            <div className="message-content">💭 Thinking...</div>
           </div>
         )}
       </div>
 
-      {/* Quick Questions */}
-      <div style={{ marginBottom: '1rem' }}>
-        <p style={{ fontSize: '0.9rem', color: '#718096', margin: '0 0 0.5rem 0' }}>
-          Quick questions:
-        </p>
-        <div className="quick-questions">
-          {quickQuestions.map((question, index) => (
-            <button
-              key={index}
-              onClick={() => setInput(question)}
-              className="quick-question-btn"
-            >
-              {question}
-            </button>
-          ))}
-        </div>
+      <div className="quick-actions">
+        {quickQuestions.map((question, index) => (
+          <button
+            key={index}
+            onClick={() => setInput(question)}
+            className="quick-btn"
+          >
+            {question}
+          </button>
+        ))}
       </div>
 
-      <div className="chat-input">
+      <div className="chat-input-container">
         <input
+          className="chat-input"
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -99,8 +96,12 @@ function Chatbot({ accessToken }) {
           placeholder="Ask about your finances..."
           disabled={loading}
         />
-        <button onClick={sendMessage} disabled={loading || !input.trim()}>
-          Send
+        <button 
+          className="send-btn" 
+          onClick={sendMessage} 
+          disabled={loading || !input.trim()}
+        >
+          🚀
         </button>
       </div>
     </div>

@@ -19,7 +19,7 @@ function App() {
       setLoadingAnalysis(true);
       setAnalysisError(null);
 
-      const res = await fetch('http://localhost:8000/api/analyze_finances', {
+      const res = await fetch('http://localhost:8001/api/analyze_finances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: 'Run full finance analysis' })
@@ -40,18 +40,8 @@ function App() {
       // alerts can be array of strings or objects
       setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
 
-      // emails may not be sent as a top-level array; also derive from subscriptions
-      const topLevelEmails = Array.isArray(data.emails) ? data.emails : [];
-      const fromSubs = (Array.isArray(data.subscriptions) ? data.subscriptions : [])
-        .filter(s => s.negotiation_email || s.email_sent || s.contact_email)
-        .map(s => ({
-          to: s.contact_email || 'Not found',
-          subject: s.email_subject || 'Subscription Discount Request',
-          body: s.negotiation_email || '',
-          email_sent: !!s.email_sent,
-          merchant: s.merchant || s.name || 'Unknown'
-        }));
-      setEmails([...topLevelEmails, ...fromSubs]);
+      // Clear emails since we removed the emails section
+      setEmails([]);
 
     } catch (err) {
       console.error(err);
@@ -61,12 +51,46 @@ function App() {
     }
   };
 
+  const handleSendEmail = async (emailData) => {
+    try {
+      const response = await fetch('http://localhost:8001/api/send_email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: emailData.to,
+          subject: emailData.subject,
+          body: emailData.body
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update subscription status only
+        setSubscriptions(prevSubs => 
+          prevSubs.map(sub => 
+            sub.merchant === emailData.merchant
+              ? { ...sub, email_sent: true }
+              : sub
+          )
+        );
+        
+        alert(`Email sent successfully to ${emailData.to}!`);
+      } else {
+        alert(`Failed to send email: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Failed to send email. Please try again.');
+    }
+  };
+
   const handlePlaidSuccess = async (token) => {
     setAccessToken(token);
 
     // 1) Insert accounts & transactions via backend
     try {
-      const response = await fetch('http://localhost:8000/api/get_transactions', {
+      const response = await fetch('http://localhost:8001/api/get_transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token: token })
@@ -82,26 +106,63 @@ function App() {
   };
 
   return (
-    <div className="App">
-      <header className="app-header">
-        <h1>AI Finance Assistant</h1>
-      </header>
-
+    <div className="app-container">
       {!accessToken ? (
-        <PlaidLogin onSuccess={handlePlaidSuccess} />
+        <div className="landing-page">
+          <div className="hero-section">
+            <div className="hero-content">
+              <h1 className="hero-title">
+                <span className="gradient-text">AI Finance</span> Assistant
+              </h1>
+              <p className="hero-subtitle">
+                Smart financial insights powered by AI. Track spending, predict expenses, and optimize subscriptions.
+              </p>
+              <div className="features-grid">
+                <div className="feature-card">
+                  <span className="feature-icon">📊</span>
+                  <span>Smart Forecasting</span>
+                </div>
+                <div className="feature-card">
+                  <span className="feature-icon">💰</span>
+                  <span>Subscription Management</span>
+                </div>
+                <div className="feature-card">
+                  <span className="feature-icon">🤖</span>
+                  <span>AI Chat Assistant</span>
+                </div>
+              </div>
+            </div>
+            <PlaidLogin onSuccess={handlePlaidSuccess} />
+          </div>
+        </div>
       ) : (
-        <div className="main-content">
-          <Dashboard
-            transactions={transactions}
-            forecast={forecast}
-            subscriptions={subscriptions}
-            alerts={alerts}
-            emails={emails}
-            loadingAnalysis={loadingAnalysis}
-            analysisError={analysisError}
-            onRefreshAnalysis={runFullAnalysis}
-          />
-          <Chatbot accessToken={accessToken} />
+        <div className="main-app">
+          <nav className="top-nav">
+            <div className="nav-brand">
+              <span className="gradient-text">💰 Finance AI</span>
+            </div>
+            <button className="refresh-btn" onClick={runFullAnalysis} disabled={loadingAnalysis}>
+              {loadingAnalysis ? '🔄' : '✨'}
+            </button>
+          </nav>
+          <div className="app-layout">
+            <main className="main-content">
+              <Dashboard
+                transactions={transactions}
+                forecast={forecast}
+                subscriptions={subscriptions}
+                alerts={alerts}
+                emails={emails}
+                loadingAnalysis={loadingAnalysis}
+                analysisError={analysisError}
+                onRefreshAnalysis={runFullAnalysis}
+                onSendEmail={handleSendEmail}
+              />
+            </main>
+            <aside className="chat-sidebar">
+              <Chatbot accessToken={accessToken} />
+            </aside>
+          </div>
         </div>
       )}
     </div>

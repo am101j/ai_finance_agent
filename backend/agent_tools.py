@@ -130,7 +130,7 @@ def extract_email_with_ai(company_name, search_results):
         from langchain_core.messages import SystemMessage, HumanMessage
         
         # Initialize LLM
-        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+        llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.1)
         
         # Prepare search content for AI analysis
         content_text = ""

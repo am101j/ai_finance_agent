@@ -84,3 +84,37 @@ def get_transaction_by_plaid_id(plaid_transaction_id):
     except requests.exceptions.RequestException as e:
         print(f"Error checking existing transaction by Plaid ID: {e}")
         return None
+
+def insert_subscription(subscription_data):
+    """Insert subscription into subscriptions table"""
+    url = f"{SUPABASE_URL}/rest/v1/subscriptions"
+    try:
+        response = requests.post(url, json=subscription_data, headers=HEADERS)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Subscription insertion error: {e}")
+        return None
+
+def insert_forecast(forecast_data):
+    """Insert forecast data into forecasts table"""
+    url = f"{SUPABASE_URL}/rest/v1/forecasts"
+    try:
+        response = requests.post(url, json=forecast_data, headers=HEADERS)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Forecast insertion error: {e}")
+        return None
+
+def get_latest_forecast():
+    """Fetch the latest forecast from the forecasts table"""
+    url = f"{SUPABASE_URL}/rest/v1/forecasts?order=id.desc&limit=1"
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        data = response.json()
+        return data[0] if data else None
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching latest forecast: {e}")
+        return None

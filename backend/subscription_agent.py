@@ -6,6 +6,7 @@ import requests
 import os
 from dotenv import load_dotenv
 import json
+from supadata import insert_subscription
 
 load_dotenv()
 
@@ -28,7 +29,7 @@ def get_transactions(state: AgentState) -> AgentState:
 
 def analyze_subscriptions(state: AgentState) -> AgentState:
     """AI agent analyzes transactions to identify subscriptions"""
-    llm = ChatGroq(model="llama3-8b-8192", temperature=0)
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
     
     # Prepare transaction data for AI
     tx_summary = []
@@ -47,14 +48,17 @@ Analyze the transactions and identify patterns that indicate subscriptions:
 - Consistent amounts from same merchants
 - Common subscription services (Netflix, Spotify, gym memberships, etc.)
 
+DO NOT INCLUDE:
+- Rent payments or housing costs
+- Credit card payments
+- Transfers or savings
+- Utilities or bills
+
 Return a JSON array of subscriptions with this format:
 [
   {
     "merchant": "NETFLIX.COM",
     "amount": 15.99,
-    "frequency": "monthly",
-    "confidence": "high",
-    "category": "streaming"
   }
 ]
 
@@ -74,7 +78,34 @@ Only include high-confidence subscriptions with clear recurring patterns."""),
         elif "```" in content:
             content = content.split("```")[1].split("```")[0]
         
-        state["subscriptions"] = json.loads(content.strip())
+        subscriptions = json.loads(content.strip())
+        print(f"AI found {len(subscriptions)} subscriptions: {subscriptions}")
+        
+        # Save each subscription to database (check for duplicates)
+        for sub in subscriptions:
+            # Check if subscription already exists
+            supabase_url = os.getenv("SUPABASE_URL")
+            supabase_key = os.getenv("SUPABASE_KEY")
+            headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
+            
+            existing = requests.get(
+                f"{supabase_url}/rest/v1/subscriptions?merchant=eq.{sub.get('merchant')}",
+                headers=headers
+            ).json()
+            
+            # Skip rent and other excluded items
+            merchant = sub.get("merchant", "").upper()
+            if any(word in merchant for word in ["RENT", "CREDIT CARD", "TRANSFER", "PAYMENT"]):
+                continue
+                
+            if not existing:  # Only insert if doesn't exist
+                subscription_data = {
+                    "merchant": sub.get("merchant"),
+                    "amount": sub.get("amount"),
+                }
+                insert_subscription(subscription_data)
+        
+        state["subscriptions"] = subscriptions
     except:
         state["subscriptions"] = []
     

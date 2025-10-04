@@ -3,6 +3,7 @@ uvicorn
 langchain
 langchain-groq
 langchain-community
+langgraph
 plaid-python
 python-dotenv
 requests
@@ -10,3 +11,4 @@ pandas
 matplotlib
 prophet
 pydantic
+supabase
