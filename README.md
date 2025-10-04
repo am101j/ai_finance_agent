@@ -2,7 +2,7 @@
 
 An intelligent personal finance management system that combines AI-powered analysis with real-time banking data to provide comprehensive financial insights, forecasting, and automated subscription management.
 
-![App Screenshot](ai_finance_agent/assets/image.png)
+![App Screenshot](assets/image.png)
 
 ## 🌟 Features
 
