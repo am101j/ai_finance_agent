@@ -393,12 +393,13 @@ config.local.*
 .qodo/
 
 # Finance Assistant specific
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.svg
+# Uncomment below lines if you want to ignore image files
+# *.png
+# *.jpg
+# *.jpeg
+# *.gif
+# *.bmp
+# *.svg
 
 # API keys and sensitive data
 api_keys.txt
