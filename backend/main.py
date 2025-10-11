@@ -1,6 +1,8 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from auth import get_current_user, get_user_id, security
 import requests
 from plaid.api import plaid_api
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
@@ -30,6 +32,10 @@ class ExchangeTokenRequest(BaseModel):
 class GetTransactionsRequest(BaseModel):
     access_token: str
 
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
 load_dotenv()
 
 app = FastAPI()
@@ -52,15 +58,35 @@ configuration = Configuration(
 api_client = ApiClient(configuration)
 client = plaid_api.PlaidApi(api_client)
 
+@app.post("/api/auth/signup")
+async def signup(request: AuthRequest):
+    try:
+        from supabase import create_client
+        supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+        response = supabase.auth.sign_up({"email": request.email, "password": request.password})
+        return {"user": response.user, "session": response.session}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/auth/login")
+async def login(request: AuthRequest):
+    try:
+        from supabase import create_client
+        supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+        response = supabase.auth.sign_in_with_password({"email": request.email, "password": request.password})
+        return {"user": response.user, "session": response.session}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/api/create_link_token")
-def create_link_token():
+def create_link_token(user_id: str = Depends(get_user_id)):
     try:
         request = LinkTokenCreateRequest(
             products=[Products('transactions')],
             client_name="Finance Assistant",
             country_codes=[CountryCode('US')],
             language="en",
-            user=LinkTokenCreateRequestUser(client_user_id="user-id-123")
+            user=LinkTokenCreateRequestUser(client_user_id=user_id)
         )
 
         response = client.link_token_create(request)
@@ -69,7 +95,7 @@ def create_link_token():
         return {"error": str(e)}
 
 @app.post("/api/exchange_token")
-async def exchange_token(request: ExchangeTokenRequest):
+async def exchange_token(request: ExchangeTokenRequest, user_id: str = Depends(get_user_id)):
     try:
         exchange_request = ItemPublicTokenExchangeRequest(public_token=request.public_token)
         response = client.item_public_token_exchange(exchange_request)
@@ -78,7 +104,7 @@ async def exchange_token(request: ExchangeTokenRequest):
         return {"error": str(e)}
 
 @app.post("/api/get_transactions")
-async def get_transactions(request: GetTransactionsRequest):
+async def get_transactions(request: GetTransactionsRequest, user_id: str = Depends(get_user_id), credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         start_date = (datetime.now() - timedelta(days=300)).date()  
         end_date = datetime.now().date()
@@ -102,7 +128,7 @@ async def get_transactions(request: GetTransactionsRequest):
         
         for account in data.get("accounts", []):
             # Check if account already exists
-            existing_account = get_account_by_name_type(account.get('name', f"{account['type']} {account['subtype']}"), account["type"])
+            existing_account = get_account_by_name_type(account.get('name', f"{account['type']} {account['subtype']}"), account["type"], credentials.credentials)
             if existing_account:
                 account_mapping[account["account_id"]] = existing_account['id']
                 print(f"Account already exists: {existing_account['name']}")
@@ -112,12 +138,17 @@ async def get_transactions(request: GetTransactionsRequest):
                     "type": account["type"],
                     "balance": account.get('balances', {}).get('current', 0)
                 }
-                result = insert_account(account_data)
+                auth_token = credentials.credentials
+                print(f"Inserting account with user_id: {user_id}, auth_token: {auth_token[:20]}...")
+                result = insert_account(account_data, user_id, auth_token)
+                print(f"Insert account result: {result}")
                 if result and isinstance(result, list) and len(result) > 0:
                     account_mapping[account["account_id"]] = result[0].get('id')
                     accounts_inserted += 1
+                    print(f"Account inserted successfully: {result[0].get('id')}")
                 else:
                     print(f"Failed to insert account: {account_data}")
+                    print(f"Result type: {type(result)}, Result: {result}")
             
         # Process transactions from Plaid API response
         transactions_inserted = 0
@@ -151,7 +182,8 @@ async def get_transactions(request: GetTransactionsRequest):
                         "category": category or "Uncategorized",
                         "plaid_transaction_id": plaid_transaction_id  # Store Plaid's unique ID
                     }
-                    result = insert_transactions(trans_data)
+                    print(f"Transaction amount: {transaction['amount']} for {transaction['name']}")
+                    result = insert_transactions(trans_data, user_id, auth_token)
                     if result:
                         transactions_inserted += 1
                     else:
@@ -166,6 +198,8 @@ async def get_transactions(request: GetTransactionsRequest):
             "total_accounts": len(data.get("accounts", [])),
             "total_transactions": len(data.get("transactions", []))
         }
+        
+        print(f"Final status: {accounts_inserted} accounts, {transactions_inserted} transactions inserted")
         
         return data
     except Exception as e:
@@ -193,7 +227,13 @@ async def get_categories():
 @app.get("/api/forecast_spending")
 async def forecast_spending():
     """Time series forecasting for spending by category"""
-    return forecast_overall_spending()
+    try:
+        result = forecast_overall_spending()
+        print(f"Forecast result: {result}")
+        return result
+    except Exception as e:
+        print(f"Forecast error: {e}")
+        return {"total_forecast": 0, "avg_daily_forecast": 0, "historical_avg_daily": 0, "chart_data": []}
 
 @app.get("/api/identify_subscriptions")
 async def identify_subscriptions():
@@ -203,8 +243,14 @@ async def identify_subscriptions():
 @app.post("/api/analyze_finances")
 async def analyze_finances(request: dict = None):
     """Run complete AI finance analysis workflow"""
-    user_query = request.get("query", "Analyze my finances") if request else "Analyze my finances"
-    return run_finance_analysis(user_query)
+    try:
+        user_query = request.get("query", "Analyze my finances") if request else "Analyze my finances"
+        result = run_finance_analysis(user_query)
+        print(f"Analysis result: {result}")
+        return result
+    except Exception as e:
+        print(f"Analysis error: {e}")
+        return {"error": str(e), "forecast": None, "subscriptions": [], "alerts": []}
 
 @app.post("/api/chat")
 async def chat_endpoint(request: Request):
@@ -258,12 +304,20 @@ async def get_spending_categories(days: int = 30):
         supabase_key = os.getenv("SUPABASE_KEY")
         headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
 
-        # Fetch transactions from last N days
-        cutoff_date = (datetime.strptime("2025-08-15", "%Y-%m-%d") - timedelta(days=days)).strftime('%Y-%m-%d')
+        # Fetch transactions from last N days before Aug 15, 2025
+        base_date = datetime(2025, 8, 15)
+        cutoff_date = (base_date - timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        print(f"Fetching transactions from {cutoff_date} onwards")
+        print(f"Query URL: {supabase_url}/rest/v1/transactions?date=gte.{cutoff_date}")
+        
         response = requests.get(
             f"{supabase_url}/rest/v1/transactions?date=gte.{cutoff_date}",
             headers=headers
         )
+        
+        print(f"Response status: {response.status_code}")
+        print(f"Response text: {response.text[:500]}...")
 
         if response.status_code != 200:
             return {"error": "Failed to fetch transactions"}
@@ -280,17 +334,23 @@ async def get_spending_categories(days: int = 30):
         category_totals = {}
         total_spending = 0
 
+        print(f"Found {len(transactions)} transactions")
+        
         for tx in transactions:
             amount = float(tx['amount'])
-            if amount <= 0:  # Only expenses
-                continue
-
+            print(f"Processing: {tx.get('description', 'Unknown')} - Amount: {amount}")
+            
             full_category = tx.get('category', 'OTHER')
             main_category = full_category.split(" > ")[0].upper()
-
-            if main_category in excluded:
+            
+            print(f"Category: {main_category}, Amount: {amount}")
+            
+            # Skip income and excluded categories (negative amounts are typically income/credits in Plaid)
+            if amount < 0 or main_category in excluded:
+                print(f"Skipping - Category: {main_category}, Amount: {amount}")
                 continue
 
+            # Positive amounts are expenses in Plaid
             category_totals.setdefault(main_category, 0)
             category_totals[main_category] += amount
             total_spending += amount
@@ -306,6 +366,9 @@ async def get_spending_categories(days: int = 30):
                 "fill": colors[i % len(colors)]
             })
 
+        print(f"Total spending calculated: {total_spending}")
+        print(f"Categories found: {list(category_totals.keys())}")
+        
         return {
             "categories": chart_data,
             "total_spending": round(total_spending, 2),

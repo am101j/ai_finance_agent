@@ -14,10 +14,16 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
-def insert_account(account_data):
+def insert_account(account_data, user_id, auth_token=None):
     url = f"{SUPABASE_URL}/rest/v1/accounts"
+    account_data["user_id"] = user_id
+    
+    headers = HEADERS.copy()
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    
     try:
-        response = requests.post(url, json=account_data, headers=HEADERS)
+        response = requests.post(url, json=account_data, headers=headers)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -26,10 +32,16 @@ def insert_account(account_data):
         print(f"Response text: {response.text if 'response' in locals() else 'No response'}")
         return None
 
-def insert_transactions(transaction_data):
+def insert_transactions(transaction_data, user_id, auth_token=None):
     url = f"{SUPABASE_URL}/rest/v1/transactions"
+    transaction_data["user_id"] = user_id
+    
+    headers = HEADERS.copy()
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    
     try:
-        response = requests.post(url, json=transaction_data, headers=HEADERS)
+        response = requests.post(url, json=transaction_data, headers=headers)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -38,14 +50,18 @@ def insert_transactions(transaction_data):
         print(f"Response text: {response.text if 'response' in locals() else 'No response'}")
         return None
 
-def get_account_by_name_type(name, account_type):
+def get_account_by_name_type(name, account_type, auth_token=None):
     base_url = f"{SUPABASE_URL}/rest/v1/accounts"
     params = {
         "name": f"eq.{name}",
         "type": f"eq.{account_type}"
     }
+    headers = HEADERS.copy()
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    
     try:
-        response = requests.get(base_url, headers=HEADERS, params=params)
+        response = requests.get(base_url, headers=headers, params=params)
         response.raise_for_status()
         data = response.json()
         return data[0] if data else None
@@ -85,22 +101,51 @@ def get_transaction_by_plaid_id(plaid_transaction_id):
         print(f"Error checking existing transaction by Plaid ID: {e}")
         return None
 
-def insert_subscription(subscription_data):
+def insert_subscription(merchant, amount, status, user_id, auth_token=None):
     """Insert subscription into subscriptions table"""
     url = f"{SUPABASE_URL}/rest/v1/subscriptions"
+    data = {
+        "merchant": merchant,
+        "amount": amount,
+        "status": status,
+        "user_id": user_id
+    }
+    
+    headers = HEADERS.copy()
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    
     try:
-        response = requests.post(url, json=subscription_data, headers=HEADERS)
+        response = requests.post(url, json=data, headers=headers)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         print(f"Subscription insertion error: {e}")
         return None
 
-def insert_forecast(forecast_data):
+def insert_forecast(total_30day_forecast, weekly_breakdown, user_id, auth_token=None):
     """Insert forecast data into forecasts table"""
-    url = f"{SUPABASE_URL}/rest/v1/forecasts"
+    headers = HEADERS.copy()
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    
+    # Delete existing forecast for this user first
     try:
-        response = requests.post(url, json=forecast_data, headers=HEADERS)
+        delete_url = f"{SUPABASE_URL}/rest/v1/forecasts?user_id=eq.{user_id}"
+        requests.delete(delete_url, headers=headers)
+    except:
+        pass
+    
+    # Insert new forecast
+    url = f"{SUPABASE_URL}/rest/v1/forecasts"
+    data = {
+        "total_30day_forecast": total_30day_forecast,
+        "weekly_breakdown": weekly_breakdown,
+        "user_id": user_id
+    }
+    
+    try:
+        response = requests.post(url, json=data, headers=headers)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:

@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import Auth from './components/Auth';
 import PlaidLogin from './components/PlaidLogin';
 import Dashboard from './components/Dashboard';
 import Chatbot from './components/Chatbot';
 import './App.css';
 
 function App() {
+  const [authToken, setAuthToken] = useState(null);
+  const [user, setUser] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [forecast, setForecast] = useState(null);
@@ -14,6 +17,31 @@ function App() {
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisError, setAnalysisError] = useState(null);
 
+  useEffect(() => {
+    const validateToken = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (!token) return;
+      
+      try {
+        const response = await fetch('http://localhost:8001/api/create_link_token', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.status === 401) {
+          localStorage.removeItem('auth_token');
+          return;
+        }
+        
+        setAuthToken(token);
+      } catch (error) {
+        localStorage.removeItem('auth_token');
+      }
+    };
+    
+    validateToken();
+  }, []);
+
   const runFullAnalysis = async () => {
     try {
       setLoadingAnalysis(true);
@@ -21,7 +49,10 @@ function App() {
 
       const res = await fetch('http://localhost:8001/api/analyze_finances', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify({ query: 'Run full finance analysis' })
       });
       const data = await res.json();
@@ -92,7 +123,10 @@ function App() {
     try {
       const response = await fetch('http://localhost:8001/api/get_transactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify({ access_token: token })
       });
       const data = await response.json();
@@ -105,9 +139,23 @@ function App() {
     await runFullAnalysis();
   };
 
+  const handleAuthSuccess = (token, userData) => {
+    setAuthToken(token);
+    setUser(userData);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    setAuthToken(null);
+    setUser(null);
+    setAccessToken(null);
+  };
+
   return (
     <div className="app-container">
-      {!accessToken ? (
+      {!authToken ? (
+        <Auth onAuthSuccess={handleAuthSuccess} />
+      ) : !accessToken ? (
         <div className="landing-page">
           <div className="hero-section">
             <div className="hero-content">
@@ -141,9 +189,13 @@ function App() {
             <div className="nav-brand">
               <span className="gradient-text">💰 Finance AI</span>
             </div>
-            <button className="refresh-btn" onClick={runFullAnalysis} disabled={loadingAnalysis}>
-              {loadingAnalysis ? '🔄' : '✨'}
-            </button>
+            <div>
+              <span style={{marginRight: '1rem', color: '#9CA3AF'}}>{user?.email}</span>
+              <button className="refresh-btn" onClick={runFullAnalysis} disabled={loadingAnalysis}>
+                {loadingAnalysis ? '🔄' : '✨'}
+              </button>
+              <button className="logout-btn" onClick={handleLogout}>Logout</button>
+            </div>
           </nav>
           <div className="app-layout">
             <main className="main-content">

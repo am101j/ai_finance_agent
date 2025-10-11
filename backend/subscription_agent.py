@@ -99,11 +99,15 @@ Only include high-confidence subscriptions with clear recurring patterns."""),
                 continue
                 
             if not existing:  # Only insert if doesn't exist
-                subscription_data = {
-                    "merchant": sub.get("merchant"),
-                    "amount": sub.get("amount"),
-                }
-                insert_subscription(subscription_data)
+                try:
+                    insert_subscription(
+                        merchant=sub.get("merchant"),
+                        amount=sub.get("amount"),
+                        status="active",
+                        user_id="00000000-0000-0000-0000-000000000000"  # Placeholder
+                    )
+                except Exception as e:
+                    print(f"Could not save subscription to database: {e}")
         
         state["subscriptions"] = subscriptions
     except:

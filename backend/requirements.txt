@@ -12,3 +12,5 @@ matplotlib
 prophet
 pydantic
 supabase
+pyjwt
+python-multipart

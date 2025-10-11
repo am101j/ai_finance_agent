@@ -152,11 +152,16 @@ def forecast_overall_spending():
             "forecast_method": "Prophet (Advanced 30-Day)"
         }
         
-        data_to_store = {
-            "total_30day_forecast": result["total_30day_forecast"],
-            "weekly_breakdown": result["weekly_breakdown"]
-        }
-        insert_forecast(data_to_store)
+        # Note: insert_forecast requires user_id but we don't have it here
+        # This will be handled when we add proper authentication to agents
+        try:
+            insert_forecast(
+                total_30day_forecast=result["total_30day_forecast"],
+                weekly_breakdown=result["weekly_breakdown"],
+                user_id="00000000-0000-0000-0000-000000000000"  # Placeholder
+            )
+        except Exception as e:
+            print(f"Could not save forecast to database: {e}")
 
         return result
     except Exception as e:

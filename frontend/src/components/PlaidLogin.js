@@ -4,8 +4,16 @@ function PlaidLogin({ onSuccess }) {
   const [linkToken, setLinkToken] = useState(null);
 
   useEffect(() => {
+    const authToken = localStorage.getItem('auth_token');
+    if (!authToken) return;
+    
     // Get link token from backend
-    fetch('http://localhost:8001/api/create_link_token', { method: 'POST' })
+    fetch('http://localhost:8001/api/create_link_token', { 
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      }
+    })
       .then(res => res.json())
       .then(data => setLinkToken(data.link_token));
   }, []);
@@ -23,9 +31,13 @@ function PlaidLogin({ onSuccess }) {
       token: linkToken,
       onSuccess: async (publicToken, metadata) => {
         // Exchange public token for access token
+        const authToken = localStorage.getItem('auth_token');
         const response = await fetch('http://localhost:8001/api/exchange_token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
           body: JSON.stringify({ public_token: publicToken })
         });
         const data = await response.json();

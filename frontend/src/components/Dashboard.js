@@ -163,6 +163,9 @@ function Dashboard({
   useEffect(() => {
     const fetchCategoryData = async () => {
       try {
+        const authToken = localStorage.getItem('auth_token');
+        if (!authToken || loadingAnalysis) return;
+        
         const response = await fetch('http://localhost:8001/api/spending_categories?days=30');
         const data = await response.json();
         setCategoryData(data);
@@ -170,8 +173,12 @@ function Dashboard({
         console.error('Failed to fetch category data:', error);
       }
     };
-    fetchCategoryData();
-  }, [transactions]);
+    
+    // Only fetch after analysis is complete
+    if (!loadingAnalysis && forecast) {
+      fetchCategoryData();
+    }
+  }, [loadingAnalysis, forecast]);
   const formatAmount = (amount) => {
     const isPositive = amount < 0;
     return {
